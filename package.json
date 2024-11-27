@@ -44,7 +44,7 @@
     "dotenv": "16.3.1",
     "fast-xml-parser": "4.5.0",
     "fs-extra": "^11.1.1",
-    "git-url-parse": "14.0.0",
+    "git-url-parse": "^16.0.0",
     "glob": "^10.3.3",
     "handlebars": "^4.7.7",
     "hot-shots": "^8.5.0",
