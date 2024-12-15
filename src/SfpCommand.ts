@@ -88,7 +88,7 @@ export default abstract class SfpCommand extends Command {
             SFPLogger.printHeaderLine('',COLOR_HEADER,LoggerLevel.INFO);
             SFPLogger.log(
                 COLOR_HEADER(
-                    `sfp  -- ❤️ by flxbl.io ❤️ -Version:${this.config.version} -Release:${this.config.pjson.release}`
+                    `sfp (community edition)  -- ❤️ by flxbl.io ❤️ -Version:${this.config.version} -Release:${this.config.pjson.release}`
                 )
             );
 
