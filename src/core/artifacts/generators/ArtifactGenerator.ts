@@ -40,7 +40,8 @@ export default class ArtifactGenerator {
 
             fs.copySync(sfpPackage.workingDirectory, sourcePackage);
             // rimraf.sync(sfpPackage.workingDirectory); // This gives an error in windows "Error: EPERM: operation not permitted, unlink" https://github.com/flxbl-io/sfp/issues/128
-            rimraf.moveRemoveSync(sfpPackage.workingDirectory);
+            await fs.remove(sfpPackage.workingDirectory);
+        
 
             //Modify Source Directory to the new source directory inside the artifact
             sfpPackage.sourceDir = `source`;
