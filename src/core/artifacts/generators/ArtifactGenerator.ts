@@ -83,8 +83,9 @@ export default class ArtifactGenerator {
             );
 
             // Cleanup unzipped artifact
-            // rimraf.sync(artifactFilepath); // This gives an error in windows "Error: EPERM: operation not permitted, unlink" https://github.com/flxbl-io/sfp/issues/128
-            rimraf.moveRemoveSync(artifactFilepath);
+            // https://github.com/flxbl-io/sfp/issues/128
+            // Undo fix for #128, use a different approach as its failing in docker
+            await fs.remove(artifactFilepath);
 
             return zipArtifactFilepath;
         } catch (error) {
