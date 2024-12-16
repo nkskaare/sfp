@@ -4,6 +4,7 @@ FROM ubuntu:24.04
 
 ARG GIT_COMMIT
 ARG NODE_MAJOR=22
+ARG SFP_VERSION
 
 LABEL org.opencontainers.image.description "sfp is a build system for modular development in Salesforce."
 LABEL org.opencontainers.image.licenses "MIT"
@@ -56,7 +57,7 @@ RUN mkdir -p /etc/apt/keyrings \
 
 # Install sfp
 RUN npm install --global --omit=dev \
-    @flxbl-io/sfp@${SFPOWERSCRIPTS_VERSION} 
+    @flxbl-io/sfp@${SFP_VERSION} 
 
 WORKDIR /root
 

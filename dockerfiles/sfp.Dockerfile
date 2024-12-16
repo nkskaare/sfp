@@ -6,6 +6,7 @@ ARG BROWSERFORCE_VERSION=4.5.0
 ARG SFDMU_VERSION=4.37.0
 ARG GIT_COMMIT
 ARG NODE_MAJOR=22
+ARG SFP_VERSION
 
 LABEL org.opencontainers.image.description "sfp is a build system for modular development in Salesforce."
 LABEL org.opencontainers.image.licenses "MIT"
@@ -89,7 +90,7 @@ RUN npm install --global yarn --omit-dev \
 # Install SF cli and sfpowerscripts
 RUN npm install --global --omit=dev \
     @salesforce/cli@${SF_CLI_VERSION} \
-    @flxbl-io/sfp@${SFPOWERSCRIPTS_VERSION} \
+    @flxbl-io/sfp@${SFP_VERSION} \
     && npm cache clean --force
 
 
