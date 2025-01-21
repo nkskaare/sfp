@@ -40,17 +40,17 @@ class VersionedPackage {
 
     constructor(
         packageName: string,
-        versionNumber: string,
-        dependencies: { package: string; versionNumber: string }[] = [],
-        path: string = null
+        versionNumber?: string,
+        dependencies?: { package: string; versionNumber: string }[],
+        path?: string
     ) {
         this.packageName = packageName;
         this.currentVersion = versionNumber;
         this.path = path;
 
-        dependencies.forEach((dep) => {
-            this.setDependency(dep.package, dep.versionNumber);
-        });
+        if (dependencies) {
+            this.setDependencies(dependencies);
+        }
     }
 
     public increment(versionType: VersionType = 'patch', customVersion: string = null): void {
@@ -58,11 +58,12 @@ class VersionedPackage {
             this.updateVersion(customVersion);
         }
 
-        let cleanedVersion = this.versionByParts().join('.');
-        this.updateVersion(semver.inc(cleanedVersion, versionType as ReleaseType));
+        this.updateVersion(semver.inc(this.cleanedVersion(), versionType as ReleaseType));
     }
 
     public updateVersion(version: string): void {
+        // semver.coerce() throw an error if the version is invalid
+
         if (this.isUpdated) {
             return;
         }
@@ -91,8 +92,17 @@ class VersionedPackage {
      * @returns cleaned version number without suffixes
      */
     versionByParts(rawVersion: string = this.currentVersion): string[] {
-        let parts = rawVersion.split('.');
-        return parts.slice(0, 3);
+        return rawVersion.split('.').slice(0, 3);
+    }
+
+    cleanedVersion(version: string = this.currentVersion): string {
+        return this.versionByParts(version).join('.');
+    }
+
+    public setDependencies(dependencies: { package: string; versionNumber?: string }[]): void {
+        dependencies.forEach((dep) => {
+            this.setDependency(dep.package, dep.versionNumber);
+        });
     }
 
     public setDependency(packageName: string, versionNumber: string): void {
@@ -113,23 +123,20 @@ class VersionedPackage {
         return dependency ? dependency : null;
     }
 
-    public updateDependency(parentPackage: VersionedPackage): void {
+    public updateDependency(parentPackage: VersionedPackage): VersionedPackage | null {
         let dependency = this.getDependency(parentPackage);
 
-        if (dependency === null) {
-            return;
+        if (dependency === null || dependency.isUpdated) {
+            return null;
         }
 
-        if (dependency.isUpdated) {
-            return;
-        }
-
-        dependency.updateVersion(parentPackage.newVersion);
+        dependency.updateVersion(this.cleanedVersion(parentPackage.newVersion));
+        return dependency;
     }
 
     public print(highlightFn = chalk.yellow.bold): string {
         if (!this.isUpdated) {
-            return `${this.versionByParts().join('.')}`;
+            return `${this.cleanedVersion()}`;
         }
 
         const oldParts = this.versionByParts();
@@ -150,27 +157,27 @@ class VersionedPackage {
     }
 
     public write(): any {
-        let updatedPackage : {
-            packageName: string;
+        let output: {
+            package: string;
             versionNumber?: string;
-            dependencies?: VersionedPackage[];
-        } = { packageName: this.packageName };
+            dependencies?: any;
+        } = { package: this.packageName };
 
         if (this.currentVersion === null || this.currentVersion === undefined) {
-            return updatedPackage;
+            return output;
         }
 
-        updatedPackage.versionNumber = this.currentVersion;
+        output.versionNumber = this.currentVersion;
 
         if (this.isUpdated) {
-            updatedPackage.versionNumber = this.newVersion;
+            output.versionNumber = this.newVersion;
         }
 
         if (this.dependencies.length > 0) {
-            updatedPackage.dependencies = this.dependencies.map((dep) => dep.write());
+            output.dependencies = this.dependencies.map((dep) => dep.write());
         }
 
-        return updatedPackage;
+        return output;
     }
 }
 
@@ -274,7 +281,7 @@ export default class VersionUpdater extends SfpCommand {
                     package: string;
                     versionNumber: string;
                     dependencies?: { package: string; versionNumber: string }[];
-                    path: string
+                    path?: string;
                 }) => [pkg.package, new VersionedPackage(pkg.package, pkg.versionNumber, pkg.dependencies, pkg.path)]
             )
         );
@@ -294,7 +301,13 @@ export default class VersionUpdater extends SfpCommand {
             return;
         }
 
-        new ReportGenerator(updatedPackages, updatedDependencies).printReport();
+        let report = new ReportGenerator(updatedPackages, updatedDependencies);
+
+        if (this.flags.json) {
+            report.setFormat('json');
+        }
+
+        report.printReport();
     }
 
     public getDiffChecker(): PackageDiff {
@@ -328,20 +341,16 @@ export default class VersionUpdater extends SfpCommand {
 
         for (const updatedPackage of updatedPackages) {
             this.projectPackages.forEach((projectPackage) => {
-                let dependency = projectPackage.getDependency(updatedPackage);
+                let dependency = projectPackage.updateDependency(updatedPackage);
 
                 if (dependency === null) {
                     return;
                 }
 
-                if (!dependency.isUpdated) {
-                    dependency.updateVersion(updatedPackage.newVersion);
-                }
-
                 if (options.deps) {
                     projectPackage.increment();
                 }
-
+                
                 updatedDependencies.push(projectPackage);
             });
         }
@@ -357,12 +366,10 @@ export default class VersionUpdater extends SfpCommand {
             return updatedPkg ? { ...pkg, ...updatedPkg.write() } : pkg;
         });
 
-        // Save the updated project data back to sfdx-project.json
         const projectConfigPath = 'sfdx-project.json';
         fs.writeFileSync(projectConfigPath, JSON.stringify(this.projectData, null, 2));
 
         SFPLogger.log(COLOR_SUCCESS(`\nsfdx-project.json updated successfully!`), LoggerLevel.INFO);
-
     }
 }
 
@@ -384,10 +391,15 @@ class GitDiff implements PackageDiff {
             let git: Git = await Git.initiateRepo();
             const changedFiles = await git.diff(['--name-only', this.targetRef]);
 
-            const updatedPackages: VersionedPackage[] = this.projectPackages
-                .filter((pkg) => changedFiles.some((file) => file.startsWith(pkg.path.replace(/^\.\//, ''))));
+            const updatedPackages: VersionedPackage[] = this.projectPackages.filter((pkg) =>
+                changedFiles.some((file) => file.startsWith(pkg.path.replace(/^\.\//, '')))
+            );
 
-            SFPLogger.log(COLOR_INFO(`\nPackages updated based on git diff against `) + chalk.yellow(chalk.bold(`${this.targetRef}:`)), LoggerLevel.INFO);
+            SFPLogger.log(
+                COLOR_INFO(`\nPackages updated based on git diff against `) +
+                    chalk.yellow(chalk.bold(`${this.targetRef}:`)),
+                LoggerLevel.INFO
+            );
             return updatedPackages;
         } catch (error) {
             SFPLogger.log(COLOR_ERROR(`Error running git diff: ${error.message}`), LoggerLevel.ERROR);
@@ -414,19 +426,22 @@ class OrgDiff implements PackageDiff {
             // ).result;
 
             // iterate over installed packages and compare with projectPackages
-            const updatedPackages = this.projectPackages
-                .filter((pkg) =>
-                    installedPackages.some(
-                        (installedPkg) =>
-                            installedPkg.SubscriberPackageName === pkg.packageName &&
-                            semver.lte(
-                                semver.coerce(pkg.currentVersion),
-                                semver.coerce(installedPkg.SubscriberPackageVersionNumber)
-                            )
-                    )
-                );
+            const updatedPackages = this.projectPackages.filter((pkg) =>
+                installedPackages.some(
+                    (installedPkg) =>
+                        installedPkg.SubscriberPackageName === pkg.packageName &&
+                        semver.lte(
+                            semver.coerce(pkg.currentVersion),
+                            semver.coerce(installedPkg.SubscriberPackageVersionNumber)
+                        )
+                )
+            );
 
-            SFPLogger.log(COLOR_INFO(`\nPackages updated based on org diff against `) + chalk.yellow(chalk.bold(`${this.targetOrg}`)), LoggerLevel.INFO);
+            SFPLogger.log(
+                COLOR_INFO(`\nPackages updated based on org diff against `) +
+                    chalk.yellow(chalk.bold(`${this.targetOrg}`)),
+                LoggerLevel.INFO
+            );
             return updatedPackages;
         } catch (error) {
             SFPLogger.log(COLOR_ERROR(`Error running org diff: ${error.message}`), LoggerLevel.ERROR);
@@ -485,6 +500,10 @@ class ReportGenerator {
         this.updatedDependencies = updatedDependencies;
     }
 
+    public setFormat(format: string) {
+        this.format = format;
+    }
+
     public printUpdatedPackages(): void {
         SFPLogger.log(COLOR_KEY_MESSAGE(`\nPackage versions updated:`), LoggerLevel.INFO);
         this.updatedPackages.forEach((pkg) => {
@@ -502,7 +521,6 @@ class ReportGenerator {
         SFPLogger.log(COLOR_KEY_MESSAGE(`\nDependencies updated:`), LoggerLevel.INFO);
 
         this.updatedDependencies.forEach((pkg) => {
-
             this.dependenciesTable.push([pkg.packageName, pkg.print()]);
 
             pkg.dependencies.forEach((dependency) => {
@@ -510,26 +528,39 @@ class ReportGenerator {
                     return;
                 }
 
-                this.dependenciesTable.push([chalk.gray(` ${this._arrow}  ${dependency.packageName}`), chalk.gray(dependency.print(chalk.cyan.bold))]);            
+                this.dependenciesTable.push([
+                    chalk.gray(` ${this._arrow}  ${dependency.packageName}`),
+                    chalk.gray(dependency.print(chalk.cyan.bold)),
+                ]);
             });
-
         });
         SFPLogger.log(this.dependenciesTable.toString(), LoggerLevel.INFO);
     }
 
     public printReport() {
+        if (this.format === 'json') {
+            this.printJSONReport();
+        } else {
+            this.printHumanReport();
+        }
+    }
 
+    private printHumanReport() {
         this.table = new Table({
             head: ['Package', 'Version'],
-            chars: ZERO_BORDER_TABLE
-        })
+            chars: ZERO_BORDER_TABLE,
+        });
 
         this.dependenciesTable = new Table({
             head: ['Package', 'Version'],
-            chars: ZERO_BORDER_TABLE
-        })
+            chars: ZERO_BORDER_TABLE,
+        });
 
         this.printUpdatedPackages();
         this.printUpdatedDependencies();
+    }
+
+    private printJSONReport() {
+        SFPLogger.log(COLOR_ERROR('Not implemented yet'), LoggerLevel.ERROR);
     }
 }
