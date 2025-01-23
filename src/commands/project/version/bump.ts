@@ -255,7 +255,7 @@ export default class VersionUpdater extends SfpCommand {
     projectData: any;
     projectPackages: Map<string, VersionedPackage>;
 
-    diffChecker: PackageDiff;
+    diffChecker: PackageUpdater;
 
     async execute(): Promise<any> {
         let logger: Logger = new ConsoleLogger();
@@ -303,16 +303,10 @@ export default class VersionUpdater extends SfpCommand {
     }
 
     private async updateVersions(): Promise<VersionedPackage[]> {
-
-        let updatedPackages = await this.getDiffChecker().getUpdatedPackages();
-
-        updatedPackages.forEach((pkg) => {
-            if (pkg.isUpdated) {
-                return;
-            }
-
-            pkg.increment(this.getVersionType(), this.flags.versionnumber);
-        });
+        const updatedPackages = await this.getDiffChecker().getUpdatedPackages(
+            this.getVersionType(),
+            this.flags.versionnumber
+        );
 
         const updatedDependencies = this.updateDependencies(updatedPackages, { deps: this.flags.deps });
 
@@ -327,17 +321,17 @@ export default class VersionUpdater extends SfpCommand {
         return updatedPackages;
     }
 
-    public getDiffChecker(): PackageDiff {
-        let diffChecker: PackageDiff = null;
+    public getDiffChecker(): PackageUpdater {
+        let diffChecker: PackageUpdater = null;
 
         if (this.flags.targetref) {
             diffChecker = new GitDiff(this.flags.targetref, Array.from(this.projectPackages.values()));
         } else if (this.flags.targetorg) {
             diffChecker = new OrgDiff(this.flags.targetorg, Array.from(this.projectPackages.values()));
         } else if (this.flags.package) {
-            diffChecker = new SinglePackageDiff(this.flags.package, Array.from(this.projectPackages.values()));
+            diffChecker = new SinglePackageUpdate(this.flags.package, Array.from(this.projectPackages.values()));
         } else if (this.flags.all) {
-            diffChecker = new AllPackageDiff(Array.from(this.projectPackages.values()));
+            diffChecker = new AllPackageUpdate(Array.from(this.projectPackages.values()));
         }
 
         if (!diffChecker) {
@@ -390,11 +384,11 @@ export default class VersionUpdater extends SfpCommand {
     }
 }
 
-interface PackageDiff {
-    getUpdatedPackages(): Promise<VersionedPackage[]>;
+interface PackageUpdater {
+    getUpdatedPackages(versionType: VersionType, versionNumber?: string): Promise<VersionedPackage[]>;
 }
 
-class GitDiff implements PackageDiff {
+class GitDiff implements PackageUpdater {
     targetRef: string;
     projectPackages: VersionedPackage[];
 
@@ -403,7 +397,7 @@ class GitDiff implements PackageDiff {
         this.projectPackages = projectPackages;
     }
 
-    async getUpdatedPackages(): Promise<VersionedPackage[]> {
+    async getUpdatedPackages(versionType: VersionType, versionNumber?: string): Promise<VersionedPackage[]> {
         try {
             let git: Git = await Git.initiateRepo();
             const changedFiles = await git.diff(['--name-only', this.targetRef]);
@@ -412,9 +406,12 @@ class GitDiff implements PackageDiff {
                 changedFiles.some((file) => file.startsWith(pkg.path.replace(/^\.\//, '')))
             );
 
+            updatedPackages.forEach((pkg) => {
+                pkg.increment(versionType, versionNumber);
+            });
+
             SFPLogger.log(
-                COLOR_INFO(`\nPackages updated based on git diff against `) +
-                    chalk.yellow(chalk.bold(`${this.targetRef}:`)),
+                COLOR_INFO(`\nPackages updated based on git diff against `) + chalk.yellow.bold(`${this.targetRef}:`),
                 LoggerLevel.INFO
             );
             return updatedPackages;
@@ -425,7 +422,7 @@ class GitDiff implements PackageDiff {
     }
 }
 
-class OrgDiff implements PackageDiff {
+class OrgDiff implements PackageUpdater {
     targetOrg: string;
     projectPackages: VersionedPackage[];
 
@@ -434,32 +431,32 @@ class OrgDiff implements PackageDiff {
         this.projectPackages = projectPackages;
     }
 
-    async getUpdatedPackages(): Promise<VersionedPackage[]> {
+    async getUpdatedPackages(versionType: VersionType, versionNumber?: string): Promise<VersionedPackage[]> {
         try {
-            const org = await SFPOrg.create({aliasOrUsername: this.targetOrg});
+            const org = await SFPOrg.create({ aliasOrUsername: this.targetOrg });
             const installedPackages = await org.getAllInstalledArtifacts();
 
-            const updatedPackages = this.projectPackages.map((pkg) => {
-                // Check if the current version is less than or equal to the installed version
-                const installedPkg = installedPackages.find(
-                    (installedPkg) =>
-                        installedPkg.name === pkg.packageName &&
-                        semver.lte(
-                            semver.coerce(pkg.currentVersion),
-                            semver.coerce(installedPkg.version)
-                        )
-                );
+            const updatedPackages = this.projectPackages
+                .map((pkg) => {
+                    // Check if the current version is less than or equal to the installed version
+                    const installedPkg = installedPackages.find(
+                        (installedPkg) =>
+                            installedPkg.name === pkg.packageName &&
+                            semver.lte(semver.coerce(pkg.currentVersion), semver.coerce(installedPkg.version))
+                    );
 
-                if (installedPkg) {
-                    pkg.updateVersion(pkg.cleanedVersion(installedPkg.version));
-                }
+                    if (installedPkg) {
+                        pkg.updateVersion(
+                            semver.inc(pkg.cleanedVersion(installedPkg.version), versionType as ReleaseType)
+                        );
+                    }
 
-                return pkg;
-            }).filter((pkg) => pkg.isUpdated);
+                    return pkg;
+                })
+                .filter((pkg) => pkg.isUpdated);
 
             SFPLogger.log(
-                COLOR_INFO(`\nPackages updated based on org diff against `) +
-                    chalk.yellow.bold(`${this.targetOrg}`),
+                COLOR_INFO(`\nPackages updated based on org diff against `) + chalk.yellow.bold(`${this.targetOrg}`),
                 LoggerLevel.INFO
             );
             return updatedPackages;
@@ -470,7 +467,7 @@ class OrgDiff implements PackageDiff {
     }
 }
 
-class SinglePackageDiff implements PackageDiff {
+class SinglePackageUpdate implements PackageUpdater {
     packageName: string;
     projectPackages: VersionedPackage[];
 
@@ -479,21 +476,30 @@ class SinglePackageDiff implements PackageDiff {
         this.projectPackages = projectPackages;
     }
 
-    async getUpdatedPackages(): Promise<VersionedPackage[]> {
+    async getUpdatedPackages(versionType: VersionType, versionNumber?: string): Promise<VersionedPackage[]> {
         const pkg = this.projectPackages.find((pkg) => pkg.packageName === this.packageName);
-        return pkg ? [pkg] : [];
+        if (!pkg) {
+            SFPLogger.log(COLOR_ERROR(`Package ${this.packageName} not found in sfdx-project.json`), LoggerLevel.ERROR);
+            process.exit(1);
+        }
+
+        pkg.increment(versionType, versionNumber);
+        return [pkg];
     }
 }
 
-class AllPackageDiff implements PackageDiff {
+class AllPackageUpdate implements PackageUpdater {
     projectPackages: VersionedPackage[];
 
     constructor(projectPackages: VersionedPackage[]) {
         this.projectPackages = projectPackages;
     }
 
-    async getUpdatedPackages(): Promise<VersionedPackage[]> {
-        return this.projectPackages;
+    async getUpdatedPackages(versionType: VersionType, versionNumber?: string): Promise<VersionedPackage[]> {
+        return this.projectPackages.map((pkg) => {
+            pkg.increment(versionType, versionNumber);
+            return pkg;
+        });
     }
 }
 
@@ -549,8 +555,8 @@ class ReportGenerator {
                 }
 
                 this.dependenciesTable.push([
-                    chalk.gray(` ${this._arrow}  ${dependency.packageName}`),
-                    chalk.gray(dependency.print(chalk.cyan.bold)),
+                    chalk.dim(` ${this._arrow}  ${dependency.packageName}`),
+                    chalk.dim(dependency.print(chalk.cyan.yellow)),
                 ]);
             });
         });
