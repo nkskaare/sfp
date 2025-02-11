@@ -533,7 +533,7 @@ class ReportGenerator {
     public printUpdatedPackages(): void {
         SFPLogger.log(COLOR_KEY_MESSAGE(`\nPackage versions updated:`), LoggerLevel.INFO);
         this.updatedPackages.forEach((pkg) => {
-            this.table.push([pkg.packageName, pkg.print()]);
+            this.table.push([pkg.packageName, ...pkg.print().split(' ')]);
         });
 
         SFPLogger.log(this.table.toString(), LoggerLevel.INFO);
@@ -547,17 +547,19 @@ class ReportGenerator {
         SFPLogger.log(COLOR_KEY_MESSAGE(`\nDependencies updated:`), LoggerLevel.INFO);
 
         this.updatedDependencies.forEach((pkg) => {
-            this.dependenciesTable.push([pkg.packageName, pkg.print()]);
+            this.dependenciesTable.push([pkg.packageName, ...pkg.print().split(' ')]);
 
             pkg.dependencies.forEach((dependency) => {
                 if (!dependency.isUpdated) {
                     return;
                 }
 
-                this.dependenciesTable.push([
-                    chalk.dim(` ${this._arrow}  ${dependency.packageName}`),
-                    chalk.dim(dependency.print(chalk.cyan.yellow)),
-                ]);
+                this.dependenciesTable.push(
+                    [
+                        ` ${this._arrow}  ${dependency.packageName}`,
+                        ...dependency.print(chalk.cyan.yellow).split(' '),
+                    ].map((value) => chalk.dim(value))
+                );
             });
         });
         SFPLogger.log(this.dependenciesTable.toString(), LoggerLevel.INFO);
@@ -573,12 +575,12 @@ class ReportGenerator {
 
     private printHumanReport() {
         this.table = new Table({
-            head: ['Package', 'Version'],
+            head: ['Package', 'Version', '', ''],
             chars: ZERO_BORDER_TABLE,
         });
 
         this.dependenciesTable = new Table({
-            head: ['Package', 'Version'],
+            head: ['Package', 'Version', '', ''],
             chars: ZERO_BORDER_TABLE,
         });
 
