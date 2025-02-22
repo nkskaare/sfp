@@ -13,7 +13,7 @@ import SFPLogger, {
     COLOR_ERROR,
 } from '@flxbl-io/sfp-logger';
 import { Flags } from '@oclif/core';
-import { arrayFlagSfdxStyle, loglevel, logsgroupsymbol } from '../../../flags/sfdxflags';
+import { loglevel, logsgroupsymbol } from '../../../flags/sfdxflags';
 
 import semver, { ReleaseType } from 'semver';
 import chalk from 'chalk';
@@ -21,13 +21,12 @@ import chalk from 'chalk';
 import Table from 'cli-table';
 import { ZERO_BORDER_TABLE } from '../../../core/display/TableConstants';
 import fs from 'fs-extra';
-import { update } from 'lodash';
 import SFPOrg from '../../../core/org/SFPOrg';
 
 const NEXT_SUFFIX = '.NEXT';
 const LATEST_SUFFIX = '.LATEST';
 
-type VersionType = semver.ReleaseType | 'custom';
+type CustomReleaseType = semver.ReleaseType | 'custom';
 
 class VersionedPackage {
     packageName: string;
@@ -59,8 +58,8 @@ class VersionedPackage {
         }
     }
 
-    public increment(versionType: VersionType = 'patch', customVersion: string = null): void {
-        if ('custom' === versionType) {
+    public increment(versionType: CustomReleaseType = 'patch', customVersion: string = null): void {
+        if (versionType === 'custom') {
             this.updateVersion(customVersion);
         }
 
@@ -103,11 +102,11 @@ class VersionedPackage {
      * Remove any suffixes and build numbers from the version number
      * @returns cleaned version number without suffixes
      */
-    versionByParts(rawVersion: string = this.currentVersion): string[] {
+    public versionByParts(rawVersion: string = this.currentVersion): string[] {
         return rawVersion.split('.').slice(0, 3);
     }
 
-    cleanedVersion(version: string = this.currentVersion): string {
+    public cleanedVersion(version: string = this.currentVersion): string {
         return this.versionByParts(version).join('.');
     }
 
@@ -271,7 +270,7 @@ export default class VersionUpdater extends SfpCommand {
         }
     }
 
-    getVersionType(): VersionType {
+    getVersionType(): CustomReleaseType {
         if (this.flags.minor) {
             return 'minor';
         }
@@ -347,7 +346,13 @@ export default class VersionUpdater extends SfpCommand {
         return this.projectPackages.get(packageName);
     }
 
-    public updateDependencies(updatedPackages: VersionedPackage[], options = { deps: false }): VersionedPackage[] {
+    /**
+     * Update dependencies based on updated packages
+     * 
+     * @param updatedPackages List of updated packages
+     * @param options Options for updating dependencies - deps: increment dependent packages
+     */
+    public updateDependencies(updatedPackages: VersionedPackage[], options = { incrementDependant: false }): VersionedPackage[] {
         let updatedDependencies: VersionedPackage[] = [];
 
         for (const updatedPackage of updatedPackages) {
@@ -358,7 +363,7 @@ export default class VersionUpdater extends SfpCommand {
                     return;
                 }
 
-                if (options.deps) {
+                if (options.incrementDependant) {
                     projectPackage.increment();
                 }
 
@@ -385,7 +390,7 @@ export default class VersionUpdater extends SfpCommand {
 }
 
 interface PackageUpdater {
-    getUpdatedPackages(versionType: VersionType, versionNumber?: string): Promise<VersionedPackage[]>;
+    getUpdatedPackages(versionType: CustomReleaseType, versionNumber?: string): Promise<VersionedPackage[]>;
 }
 
 class GitDiff implements PackageUpdater {
@@ -397,7 +402,7 @@ class GitDiff implements PackageUpdater {
         this.projectPackages = projectPackages;
     }
 
-    async getUpdatedPackages(versionType: VersionType, versionNumber?: string): Promise<VersionedPackage[]> {
+    async getUpdatedPackages(versionType: CustomReleaseType, versionNumber?: string): Promise<VersionedPackage[]> {
         try {
             let git: Git = await Git.initiateRepo();
             const changedFiles = await git.diff(['--name-only', this.targetRef]);
@@ -431,14 +436,16 @@ class OrgDiff implements PackageUpdater {
         this.projectPackages = projectPackages;
     }
 
-    async getUpdatedPackages(versionType: VersionType, versionNumber?: string): Promise<VersionedPackage[]> {
+    /**
+     * Check
+     */
+    async getUpdatedPackages(versionType: CustomReleaseType, versionNumber?: string): Promise<VersionedPackage[]> {
         try {
             const org = await SFPOrg.create({ aliasOrUsername: this.targetOrg });
             const installedPackages = await org.getAllInstalledArtifacts();
 
             const updatedPackages = this.projectPackages
                 .map((pkg) => {
-                    // Check if the current version is less than or equal to the installed version
                     const installedPkg = installedPackages.find(
                         (installedPkg) =>
                             installedPkg.name === pkg.packageName &&
@@ -476,7 +483,7 @@ class SinglePackageUpdate implements PackageUpdater {
         this.projectPackages = projectPackages;
     }
 
-    async getUpdatedPackages(versionType: VersionType, versionNumber?: string): Promise<VersionedPackage[]> {
+    async getUpdatedPackages(versionType: CustomReleaseType, versionNumber?: string): Promise<VersionedPackage[]> {
         const pkg = this.projectPackages.find((pkg) => pkg.packageName === this.packageName);
         if (!pkg) {
             SFPLogger.log(COLOR_ERROR(`Package ${this.packageName} not found in sfdx-project.json`), LoggerLevel.ERROR);
@@ -495,7 +502,7 @@ class AllPackageUpdate implements PackageUpdater {
         this.projectPackages = projectPackages;
     }
 
-    async getUpdatedPackages(versionType: VersionType, versionNumber?: string): Promise<VersionedPackage[]> {
+    async getUpdatedPackages(versionType: CustomReleaseType, versionNumber?: string): Promise<VersionedPackage[]> {
         return this.projectPackages.map((pkg) => {
             pkg.increment(versionType, versionNumber);
             return pkg;
