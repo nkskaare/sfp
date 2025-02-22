@@ -1,10 +1,10 @@
 {
   "name": "@flxbl-io/sfp",
   "description": "sfp is a CLI tool to help you manage your Salesforce projects in an artifact centric model",
-  "version": "39.5.0",
+  "version": "39.5.1",
   "license": "MIT",
   "author": "flxblio",
-  "release": "December 24",
+  "release": "March 24",
   "bin": {
     "sfp": "./bin/run",
     "sfpowerscripts": "./bin/run"
@@ -18,7 +18,7 @@
     "@flxbl-io/apexlink": "4.0.1",
     "@flxbl-io/sfdx-process-wrapper": "3.0.0",
     "@flxbl-io/sfp-logger": "5.0.1",
-    "@flxbl-io/sfprofiles": "5.2.0",
+    "@flxbl-io/sfprofiles": "5.2.1",
     "@jsforce/jsforce-node": "^3.2.0",
     "@newrelic/telemetry-sdk": "^0.6.0",
     "@oclif/core": "2.11.8",
